@@ -1,0 +1,16 @@
+uvicorn
+fastapi[standard]
+pydantic
+pydantic-settings
+pymongo
+boto3
+pymupdf
+openai
+pandas
+awscli
+configure
+certifi>=2023.7.22
+passlib[bcrypt]
+groq
+cryptography==44.0.1
+pyJWT==2.10.1 
