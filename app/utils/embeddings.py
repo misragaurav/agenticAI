@@ -1,6 +1,7 @@
 import boto3
 import json
 from app.core.config import get_settings
+from typing import List
 
 settings = get_settings()
 
@@ -17,8 +18,8 @@ def get_embedding_from_bedrock(input_text, model_id=None, dimensions=None, norma
     Returns:
         dict: Contains 'embedding' (list of floats), 'input_token_count' (int)
     """
-    # Use settings if parameters not provided
-    model_id = model_id or settings.BEDROCK_MODEL_ID
+    # Use default model if not specified
+    model_id = model_id or settings.EMBEDDING_MODEL_ID
     dimensions = dimensions or settings.EMBEDDING_DIMENSIONS
     
     # Initialize the Bedrock Runtime client

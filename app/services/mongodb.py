@@ -9,20 +9,30 @@ from app.core.config import get_secret
 mongo_client = None
 mongo_collection = None
 
-def initialize_db():
-    """Initialize the MongoDB connection and set global variables."""
+def initialize_db(db_name: str, collection_name: str):
+    """Initialize the MongoDB connection and set global variables.
+    
+    Args:
+        db_name (str): The name of the database to connect to.
+        collection_name (str): The name of the collection to use.
+    """
     global mongo_client, mongo_collection
     secrets = get_secret()
     try:
+        # Construct connection string securely
+        connection_string = f"mongodb+srv://mongo_user:{secrets['mongoDb_secret']}@cluster0.mjvbe.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+        
         mongo_client = MongoClient(
-            f"mongodb+srv://gauravadmin:{secrets['mongoDb_secret']}@cluster0.mjvbe.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0",
+            connection_string,
             tls=True,
             tlsCAFile=certifi.where(),
-            tlsAllowInvalidCertificates=True,
+            tlsAllowInvalidCertificates=True, # Consider security implications
             maxPoolSize=100
         )
-        db = mongo_client.se
-        mongo_collection = db.fix_chunk_300tok_20overlap
+        # Use the provided db_name and collection_name
+        db = mongo_client[db_name]
+        mongo_collection = db[collection_name]
+        print(f"Connected to MongoDB - DB: '{db_name}', Collection: '{collection_name}'")
         return mongo_client, mongo_collection
     except Exception as e:
         print(f"Failed to connect to MongoDB: {str(e)}")

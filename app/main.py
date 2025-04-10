@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
 from contextlib import asynccontextmanager
 
-from app.services.mongodb import initialize_db, close_db_connection
+from app.services.mongodb import mongo_client, mongo_collection, initialize_db, close_db_connection, get_db
 from app.routers import predicates, similarities, getpdf
 from app.auth.aws.authorizer import cognito_jwt_authorizer_access_token as access_token
 from app.core.config import get_settings
@@ -14,20 +14,20 @@ from app.core.config import get_settings
 settings = get_settings()
 
 # Set environment variables
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+# os.environ["TOKENIZERS_PARALLELISM"] = "false" # Removed as HF tokenizers library not directly used client-side
 
-# Configure thread pool
-MAX_WORKERS = min(20, multiprocessing.cpu_count() * 2)
-thread_pool = ThreadPoolExecutor(max_workers=MAX_WORKERS)
-print("MAX_WORKERS: ", MAX_WORKERS)
+# Configure thread pool - REMOVED as it wasn't used and duplicated
+# MAX_WORKERS = min(20, multiprocessing.cpu_count() * 2)
+# thread_pool = ThreadPoolExecutor(max_workers=MAX_WORKERS)
+# print("MAX_WORKERS: ", MAX_WORKERS)
 
 # Define lifespan context manager for MongoDB connection
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup code (runs before the app starts)
-    global mongo_client, mongo_collection
-    mongo_client, mongo_collection = initialize_db()
-    print("MongoDB connection established")
+    settings = get_settings() # Get settings instance
+    initialize_db(db_name=settings.MONGO_DB_NAME, collection_name=settings.MONGO_COLLECTION_NAME)
+    # print("MongoDB connection established") # Message now printed within initialize_db
     
     yield  # The app runs here
     
@@ -48,16 +48,12 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://*.d3fpidck5m9dfi.amplifyapp.com"],
-    #allow_origins=["*"],  # Uncomment for local testing
+    #allow_origins=["https://*seai*"],
+    allow_origins=["*"],  # Uncomment for local testing
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Create dependency to provide MongoDB collection to routes
-def get_db():
-    return mongo_collection
 
 # Override the dependency in routers
 app.dependency_overrides[lambda: None] = get_db

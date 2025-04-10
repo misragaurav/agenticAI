@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Keyword extraction settings
 KEYWORD_EXTRACTION_COUNT = 4  # Number of keywords to extract
-SYNONYM_COUNT_PER_KEYWORD = 3  # Number of synonyms per keyword
+SYNONYM_COUNT_PER_KEYWORD = 2  # Number of synonyms per keyword
 
 # Search component weights (must sum to 1.0)
 SEARCH_WEIGHTS = {
@@ -23,14 +23,18 @@ SEARCH_WEIGHTS_TUPLE = (
 )
 
 class AppSettings(BaseSettings):
-    AWS_REGION_NAME: str = "us-east-2"
-    AWS_COGNITO_USER_POOL_ID: str = "us-east-2_onzgxu6oQ"
-    AWS_COGNITO_APP_CLIENT_ID: str = "1t97t3qrackdsrrbi2tgh8qggm"
-    BEDROCK_MODEL_ID: str = "amazon.titan-embed-text-v2:0"
-    EMBEDDING_DIMENSIONS: int = 256
+    # AWS Cognito settings moved to app/auth/settings.py
+    AWS_SECRETS_MANAGER_REGION: str = "us-west-2" 
+
+    EMBEDDING_MODEL_ID: str = "amazon.titan-embed-text-v2:0"
+    EMBEDDING_DIMENSIONS: int = 1024
     S3_BUCKET_NAME: str = "klettersfast"
     S3_BUCKET_PATH: str = "klettersfast/"
-    LLM_MODEL: str = "deepseek-r1-distill-qwen-32b"
+    LLM_MODEL: str = "deepseek-r1-distill-llama-70b"
+    
+    # MongoDB Settings
+    MONGO_DB_NAME: str = "se"
+    MONGO_COLLECTION_NAME: str = "fixed_150tok_1024dims"
     
     model_config = SettingsConfigDict(env_file=".env")
 
@@ -48,7 +52,9 @@ def get_secret():
         dict: Dictionary containing secrets
     """
     secret_name = "openai_hf_mongo_keys"
-    region_name = "us-west-2"
+    # Use the region defined in settings
+    settings = get_settings()
+    region_name = settings.AWS_SECRETS_MANAGER_REGION
 
     session = boto3.session.Session()
     client = session.client(

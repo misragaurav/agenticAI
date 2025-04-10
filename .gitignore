@@ -32,7 +32,6 @@ ENV/
 *.swo
 
 # Environment variables
-.env
 .env.local
 
 # OS specific

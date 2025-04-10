@@ -1,7 +1,11 @@
-from openai import OpenAI
+from openai import OpenAI, APIConnectionError, RateLimitError
+from openai.types.chat import ChatCompletion
+from app.core.config import get_settings, get_secret, KEYWORD_EXTRACTION_COUNT, SYNONYM_COUNT_PER_KEYWORD
 import boto3
 import os
-from app.core.config import get_settings, get_secret
+import re
+from typing import Dict, List, Any
+import json
 
 settings = get_settings()
 
@@ -21,6 +25,139 @@ def remove_think_tags(text: str) -> str:
         end = result.find('</think>') + len('</think>')
         result = result[:start].strip() + ' ' + result[end:].strip()
     return result
+
+
+def get_keywords_synonyms(text: str, num_keywords: int = KEYWORD_EXTRACTION_COUNT, num_synonyms: int = SYNONYM_COUNT_PER_KEYWORD) -> Dict[str, List[str]]:
+    """
+    Extract keywords from text and generate synonyms for each keyword using LLM.
+    
+    Args:
+        text: Input text
+        num_keywords: Number of keywords to extract (default from config)
+        num_synonyms: Number of synonyms to generate per keyword (default from config)
+        
+    Returns:
+        Dictionary with keywords as keys and lists of synonyms as values
+    """
+    llm_client = LLMClient(settings.LLM_MODEL)
+    
+    prompt = f"""
+    You are tasked with extracting key medical device terminology from the following text and generating relevant synonyms.
+    
+    Text:
+    {text}
+    
+    Please extract exactly {num_keywords} important keywords from the text. For each keyword, provide {num_synonyms} synonyms or related terms.
+    
+    Return your response ONLY as a JSON object where each key is a keyword and its value is an array of synonyms. For example:
+    {{
+        "imaging device": ["radiological system", "medical imaging apparatus", "diagnostic imaging unit"],
+        "radiography": ["X-ray imaging", "radiological examination", "radiographic procedure"]
+    }}
+    
+    Focus on technical terms, medical device features, and specific functions mentioned in the text.
+    """
+    
+    try:
+        # First attempt with JSON response format
+        response = llm_client.complete(
+            prompt, 
+            max_tokens=1000, 
+            temperature=0.2,
+            top_p=0.95,
+            stream=False,
+            response_format={"type": "json_object"},
+            extra_body={"service_tier": "on_demand"}
+        )
+        
+        # Parse the JSON response
+        # import json # Already imported at module level
+        try:
+            result = json.loads(response)
+            
+            # Verify we have enough keywords
+            if len(result) < num_keywords:
+                print(f"Warning: Only extracted {len(result)} keywords, needed {num_keywords}")
+                
+            return result
+        except json.JSONDecodeError as json_err:
+            print(f"Failed to parse JSON response: {str(json_err)}")
+            print(f"Response received: {response[:100]}...")
+            # Continue to fallback methods
+        
+    except Exception as e:
+        print(f"JSON generation failed: {str(e)}")
+        
+        # Fallback to plain text format
+        try:
+            fallback_prompt = f"""
+            You are tasked with extracting key medical device terminology from the following text and generating relevant synonyms.
+            
+            Text:
+            {text}
+            
+            Please extract exactly {num_keywords} important keywords from the text. For each keyword, provide {num_synonyms} synonyms or related terms.
+            
+            Format your response as follows:
+            
+            KEYWORD: keyword1
+            SYNONYMS: synonym1, synonym2, synonym3
+            
+            KEYWORD: keyword2
+            SYNONYMS: synonym1, synonym2, synonym3
+            
+            Focus on technical terms, medical device features, and specific functions mentioned in the text.
+            """
+            
+            response = llm_client.complete(
+                fallback_prompt, 
+                max_tokens=1000, 
+                temperature=0.2,
+                top_p=0.95,
+                stream=False,
+                response_format=None,  # No JSON
+                extra_body={"service_tier": "on_demand"}
+            )
+            
+            # Parse line-by-line format
+            result = {}
+            lines = response.strip().split('\n')
+            
+            current_keyword = None
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                if line.upper().startswith('KEYWORD:'):
+                    current_keyword = line[line.find(':')+1:].strip()
+                elif (line.upper().startswith('SYNONYMS:') or line.upper().startswith('SYNONYM:')) and current_keyword:
+                    synonyms_part = line[line.find(':')+1:].strip()
+                    synonyms = [s.strip() for s in synonyms_part.split(',')]
+                    while len(synonyms) < num_synonyms:
+                        synonyms.append(f"variant of {current_keyword}")
+                    
+                    result[current_keyword] = synonyms[:num_synonyms]
+                    current_keyword = None
+            
+            if result:
+                return result
+        except Exception as nested_e:
+            print(f"\n\n Fallback parsing failed: {str(nested_e)}")
+        
+        # Final fallback: return generic terms
+        print("Using blank as fallback")
+        fallback_keywords = [
+            " "
+        ]
+        
+        result = {}
+        for i in range(min(num_keywords, len(fallback_keywords))):
+            keyword = fallback_keywords[i]
+            result[keyword] = [f"{keyword} variant", f"alternative {keyword}", f"similar {keyword}"][:num_synonyms]
+            
+        return result
 
 
 class LLMClient:
@@ -83,7 +220,7 @@ class LLMClient:
         else:
             return self.model_type  # Return the Groq model name directly
     
-    def complete(self, prompt, max_tokens=1024, temperature=0.2, top_p=0.95, stream=False, response_format=None, extra_body=None):
+    def complete(self, prompt, max_tokens=1024, temperature=0.1, top_p=0.95, stream=False, response_format=None, extra_body=None):
         """
         Generate a completion for the given prompt.
         
@@ -276,8 +413,8 @@ def write_sim_diff_discussion(subject_text, predicate_text, sim_or_diff, client,
     
     return client.complete(
         prompt, 
-        max_tokens=2000, 
-        temperature=0.3,
+        max_tokens=3000, 
+        temperature=0.1,
         top_p=0.95,
         stream=False,
         response_format=None,  # Not returning JSON
@@ -354,7 +491,7 @@ def write_detailed_sim_diff_discussion(kletter_text, predicate_manuals_text, use
     similarities = client.complete(
         similarities_prompt, 
         max_tokens=2000, 
-        temperature=0.3,
+        temperature=0.15,
         top_p=0.95,
         stream=False,
         response_format=None,  # Not returning JSON
@@ -364,7 +501,7 @@ def write_detailed_sim_diff_discussion(kletter_text, predicate_manuals_text, use
     differences = client.complete(
         differences_prompt, 
         max_tokens=5000, 
-        temperature=0.3,
+        temperature=0.15,
         top_p=0.95,
         stream=False,
         response_format=None,  # Not returning JSON
@@ -406,7 +543,7 @@ def get_device_attributes(text, attributes_dict, client, model):
     response = client.complete(
         prompt, 
         max_tokens=1500, 
-        temperature=0.2,
+        temperature=0.1,
         top_p=0.95,
         stream=False,
         response_format={"type": "json_object"},  # JSON response
@@ -424,4 +561,107 @@ def get_device_attributes(text, attributes_dict, client, model):
         else:
             return {}
     except:
-        return {} 
+        return {}
+
+
+def reranker_LLM(
+    results_list: List[Dict[str, Any]],
+    request_data: Dict[str, Any]
+) -> List[str]:
+    """
+    Uses an LLM to rerank predicate results based on matching criteria.
+    Assumes the incoming results_list is already limited appropriately.
+
+    Args:
+        results_list: A list of dictionaries, where each dictionary represents a 
+                      predicate device result and contains at least 
+                      'k_number', 'indications', 'device_description', 'operating_principle'.
+        request_data: A dictionary containing the user's input device info with keys 
+                      'indications', 'device_details', 'operating_principle'.
+
+
+    Returns:
+        A list of k_numbers that the LLM identified as clearly NOT matching.
+    """
+    llm_client = LLMClient(settings.LLM_MODEL)
+
+    # Format the input request data for the prompt
+    request_prompt_part = f"""Input Device Criteria:
+    - Indications: {request_data.get('indications', 'N/A')}
+    - Device Details: {request_data.get('device_details', 'N/A')}
+    - Operating Principle: {request_data.get('operating_principle', 'N/A')}
+    """
+
+    # Format the candidate results for the prompt (using the pre-limited list)
+    candidates_prompt_part = "\n\nCandidate Predicate Devices:\n"
+    MAX_TEXT_LEN_PER_FIELD = 1000 # Limit characters per field
+    
+    # No need to limit here: limited_results = results_list[:max_results_to_llm]
+    if not results_list: # Check the received list directly
+        print("Reranker: No results received to rerank.")
+        return []
+
+    # Use results_list directly
+    for i, res in enumerate(results_list):
+        candidates_prompt_part += f"""
+        --- Candidate {i+1} ---
+        K-Number: {res.get('k_number', 'N/A')}
+        Indications: {str(res.get('indications', 'N/A'))[:MAX_TEXT_LEN_PER_FIELD]}...
+        Device Description: {str(res.get('device_description', 'N/A'))[:MAX_TEXT_LEN_PER_FIELD]}...
+        Operating Principle: {str(res.get('operating_principle', 'N/A'))[:MAX_TEXT_LEN_PER_FIELD]}...
+        """
+
+    # Construct the main prompt
+    prompt = f"""
+
+    Instructions:
+    You are a medical device regulatory expert specializing in 510(k) submissions. Your task is to identify candidate predicate devices from the list above whose 'Indications', 'Device Description', AND 'Operating Principle' clearly DO NOT match the Input Device Criteria. 
+    Focus on significant mismatches. If a candidate seems potentially relevant or you are unsure, DO NOT include it in the list of non-matches.
+    
+    Return ONLY a JSON object containing a single key "remove_knumbers", where the value is an array of strings listing the K-Numbers of the candidates that clearly DO NOT match. 
+    Example: {{"remove_knumbers": ["K423456", "K423457"]}}
+    If no candidates clearly mismatch, return: {{"remove_knumbers": []}}
+
+    {request_prompt_part}
+    {candidates_prompt_part}
+    
+    Return ONLY a JSON object containing a single key "remove_knumbers", where the value is an array of strings listing the K-Numbers of the candidates that clearly DO NOT match. 
+    Example: {{"remove_knumbers": ["K423456", "K423457"]}}
+    If no candidates clearly mismatch, return: {{"remove_knumbers": []}}
+    """
+
+    # Log based on the length of the received list
+    print(f"Reranker: Sending {len(results_list)} candidates to LLM for review.")
+    
+    try:
+        response = llm_client.complete(
+            prompt,
+            max_tokens=100000, # Enough for a list of K-numbers
+            temperature=0.0, # Low temperature for factual task
+            top_p=1.0,
+            stream=False,
+            response_format={"type": "json_object"}, # Enforce JSON output
+            extra_body={"service_tier": "on_demand"}
+        )
+        
+        print(f"Reranker LLM raw response: {response}")
+
+        # Parse the JSON response
+        try:
+            parsed_json = json.loads(response)
+            # Ensure the key exists and it's a list
+            if isinstance(parsed_json.get("remove_knumbers"), list):
+                knumbers_to_remove = parsed_json["remove_knumbers"]
+                print(f"Reranker: LLM identified {len(knumbers_to_remove)} K-numbers to remove: {knumbers_to_remove}")
+                # Validate that returned items are strings (basic check)
+                return [kn for kn in knumbers_to_remove if isinstance(kn, str)]
+            else:
+                print("Reranker: LLM response JSON missing 'remove_knumbers' list.")
+                return [] # Return empty list if key missing or not a list
+        except json.JSONDecodeError as json_err:
+            print(f"Reranker: Failed to parse LLM JSON response: {str(json_err)}")
+            return [] # Return empty list on parsing error
+        
+    except Exception as e:
+        print(f"Reranker: Error during LLM call: {str(e)}")
+        return [] # Return empty list on general LLM call error 
