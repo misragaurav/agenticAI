@@ -119,9 +119,10 @@ def _prepare_reranker_input(results_list: List[DeviceResult], request_data: Pred
     reranker_input_results = [
         {
             "k_number": res.k_number,
-            "indications": res.indications,
-            "device_description": res.device_description,
-            "operating_principle": res.operating_principle
+            # Apply escape_quotes to each field
+            "indications": escape_quotes(res.indications),
+            "device_description": escape_quotes(res.device_description),
+            "operating_principle": escape_quotes(res.operating_principle)
         } 
         for res in results_list # Use the list of DeviceResult objects
     ]
@@ -345,7 +346,7 @@ async def get_predicates_using_all_fields_and_keywords(
             if not initial_results_list:
                 print("Reranking Step: No initial results to rerank.")
             
-            MAX_RERANKER_CANDIDATES = 20 # Define how many top results to rerank
+            MAX_RERANKER_CANDIDATES = 15 # Define how many top k-letters to rerank
             candidates_for_reranking = initial_results_list[:MAX_RERANKER_CANDIDATES]
             print(f"Considering top {len(candidates_for_reranking)} candidates for reranking.")
 

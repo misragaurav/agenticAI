@@ -6,6 +6,7 @@ import os
 import re
 from typing import Dict, List, Any
 import json
+import time # Added for retry delay
 
 settings = get_settings()
 
@@ -633,35 +634,56 @@ def reranker_LLM(
     # Log based on the length of the received list
     print(f"Reranker: Sending {len(results_list)} candidates to LLM for review.")
     
-    try:
-        response = llm_client.complete(
-            prompt,
-            max_tokens=100000, # Enough for a list of K-numbers
-            temperature=0.0, # Low temperature for factual task
-            top_p=1.0,
-            stream=False,
-            response_format={"type": "json_object"}, # Enforce JSON output
-            extra_body={"service_tier": "on_demand"}
-        )
-        
-        print(f"Reranker LLM raw response: {response}")
+    #print(f"\n--- Reranker Prompt Start ---\n{prompt}\n--- Reranker Prompt End ---\n") # Added prompt logging
 
-        # Parse the JSON response
+    max_retries = 2
+    retry_delay = 7.5 # seconds
+
+    for attempt in range(max_retries + 1):
         try:
-            parsed_json = json.loads(response)
-            # Ensure the key exists and it's a list
-            if isinstance(parsed_json.get("remove_knumbers"), list):
-                knumbers_to_remove = parsed_json["remove_knumbers"]
-                print(f"Reranker: LLM identified {len(knumbers_to_remove)} K-numbers to remove: {knumbers_to_remove}")
-                # Validate that returned items are strings (basic check)
-                return [kn for kn in knumbers_to_remove if isinstance(kn, str)]
+            response = llm_client.complete(
+                prompt,
+                max_tokens=100000, # Enough for a list of K-numbers
+                temperature=0.0, # Low temperature for factual task
+                top_p=1.0,
+                stream=False,
+                response_format={"type": "json_object"}, # Enforce JSON output
+                extra_body={"service_tier": "on_demand"}
+            )
+            
+            print(f"Reranker LLM raw response: {response}")
+
+            # Parse the JSON response
+            try:
+                parsed_json = json.loads(response)
+                # Ensure the key exists and it's a list
+                if isinstance(parsed_json.get("remove_knumbers"), list):
+                    knumbers_to_remove = parsed_json["remove_knumbers"]
+                    print(f"Reranker: LLM identified {len(knumbers_to_remove)} K-numbers to remove: {knumbers_to_remove}")
+                    # Validate that returned items are strings (basic check)
+                    # Success! Return the result and exit the function
+                    return [kn for kn in knumbers_to_remove if isinstance(kn, str)]
+                else:
+                    print("Reranker: LLM response JSON missing 'remove_knumbers' list.")
+                    break # Non-retryable error in response format, break loop
+            except json.JSONDecodeError as json_err:
+                print(f"Reranker: Failed to parse LLM JSON response: {str(json_err)}")
+                break # Non-retryable error in response format, break loop
+            
+        except Exception as e:
+            error_str = str(e)
+            print(f"Reranker: Error during LLM call (Attempt {attempt + 1}/{max_retries + 1}): {error_str}")
+
+            # Check if it's a 503 error and if retries are left
+            if "Error code: 503" in error_str and attempt < max_retries:
+                print(f"Service unavailable. Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                # Continue to the next iteration of the loop
             else:
-                print("Reranker: LLM response JSON missing 'remove_knumbers' list.")
-                return [] # Return empty list if key missing or not a list
-        except json.JSONDecodeError as json_err:
-            print(f"Reranker: Failed to parse LLM JSON response: {str(json_err)}")
-            return [] # Return empty list on parsing error
-        
-    except Exception as e:
-        print(f"Reranker: Error during LLM call: {str(e)}")
-        return [] # Return empty list on general LLM call error 
+                # Last attempt failed with 503, or a different error occurred
+                print("Reranker: LLM call failed after retries or encountered non-retryable error.")
+                break # Exit the retry loop
+
+    # If the loop finishes without returning successfully (due to breaks or exhausting retries)
+    print("Reranker: Returning empty list after failing LLM call.")
+    return [] 

@@ -30,7 +30,8 @@ class AppSettings(BaseSettings):
     EMBEDDING_DIMENSIONS: int = 1024
     S3_BUCKET_NAME: str = "klettersfast"
     S3_BUCKET_PATH: str = "klettersfast/"
-    LLM_MODEL: str = "deepseek-r1-distill-llama-70b"
+    #LLM_MODEL: str = "deepseek-r1-distill-llama-70b"
+    LLM_MODEL: str = "qwen-qwq-32b"
     
     # MongoDB Settings
     MONGO_DB_NAME: str = "se"
