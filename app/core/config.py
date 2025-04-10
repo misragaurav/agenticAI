@@ -36,7 +36,6 @@ class AppSettings(BaseSettings):
     MONGO_DB_NAME: str = "se"
     MONGO_COLLECTION_NAME: str = "fixed_150tok_1024dims"
 
-
 @lru_cache
 def get_settings():
     return AppSettings()

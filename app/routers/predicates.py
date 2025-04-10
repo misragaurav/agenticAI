@@ -131,68 +131,68 @@ def _prepare_reranker_input(results_list: List[DeviceResult], request_data: Pred
     
     return reranker_input_results, reranker_request_data
 
-@router.post("/getPredicates", response_model=PredicateResponse)
-async def get_predicates(request: PredicateRequest, raw_request: Request, mongo_collection=Depends(get_db)):
-    try:
-        # Log the raw request for debugging
-        body = await raw_request.json()
-        print(f"Received request: {body}")
+# @router.post("/getPredicates", response_model=PredicateResponse)
+# async def get_predicates(request: PredicateRequest, raw_request: Request, mongo_collection=Depends(get_db)):
+#     try:
+#         # Log the raw request for debugging
+#         body = await raw_request.json()
+#         print(f"Received request: {body}")
         
-        start_time = time.time()
+#         start_time = time.time()
 
-        # Validation checks
-        if request.number_of_predicates < 1:
-            raise HTTPException(
-                status_code=422,
-                detail="number_of_predicates must be greater than 0"
-            )
+#         # Validation checks
+#         if request.number_of_predicates < 1:
+#             raise HTTPException(
+#                 status_code=422,
+#                 detail="number_of_predicates must be greater than 0"
+#             )
 
-        if not all([request.indications, request.device_details, request.operating_principle]):
-            raise HTTPException(
-                status_code=422,
-                detail="indications, device_details, and operating_principle cannot be empty"
-            )
+#         if not all([request.indications, request.device_details, request.operating_principle]):
+#             raise HTTPException(
+#                 status_code=422,
+#                 detail="indications, device_details, and operating_principle cannot be empty"
+#             )
 
-        # Use device_attributes directly as the details
-        detail_dict = DetailDict(details=request.device_attributes or {})
+#         # Use device_attributes directly as the details
+#         detail_dict = DetailDict(details=request.device_attributes or {})
 
-        print("Progress: 10% - Querying MongoDB for similar documents...")
-        k_letters_n_scores = query_mongo_db(
-            mongo_collection, 
-            request.indications, 
-            model_id=settings.EMBEDDING_MODEL_ID, 
-            dimensions=settings.EMBEDDING_DIMENSIONS, 
-            normalize=True
-        )
+#         print("Progress: 10% - Querying MongoDB for similar documents...")
+#         k_letters_n_scores = query_mongo_db(
+#             mongo_collection, 
+#             request.indications, 
+#             model_id=settings.EMBEDDING_MODEL_ID, 
+#             dimensions=settings.EMBEDDING_DIMENSIONS, 
+#             normalize=True
+#         )
         
-        print("Progress: 20% - Processing query results...")
-        df = pd.DataFrame(k_letters_n_scores)
-        df['metadata'] = df['metadata'].apply(json.loads)
-        df['knumber'] = df['metadata'].apply(lambda x: x['source'].split("/")[-1].split(".")[0])
-        df['filepath'] = df['metadata'].apply(lambda x: x['source'])
+#         print("Progress: 20% - Processing query results...")
+#         df = pd.DataFrame(k_letters_n_scores)
+#         df['metadata'] = df['metadata'].apply(json.loads)
+#         df['knumber'] = df['metadata'].apply(lambda x: x['source'].split("/")[-1].split(".")[0])
+#         df['filepath'] = df['metadata'].apply(lambda x: x['source'])
 
-        # max score instead of mean score
-        grouped_df = df.groupby('knumber')['score'].max().reset_index()
-        top_kletters = grouped_df.nlargest(request.number_of_predicates, 'score')
+#         # max score instead of mean score
+#         grouped_df = df.groupby('knumber')['score'].max().reset_index()
+#         top_kletters = grouped_df.nlargest(request.number_of_predicates, 'score')
         
-        # Process all k-letters in parallel using run_in_executor
-        loop = asyncio.get_event_loop()
-        tasks = [
-            loop.run_in_executor(None, _process_kletter_result, row.to_dict(), mongo_collection) 
-            for _, row in top_kletters.iterrows()
-        ]
-        results_list = await asyncio.gather(*tasks)
+#         # Process all k-letters in parallel using run_in_executor
+#         loop = asyncio.get_event_loop()
+#         tasks = [
+#             loop.run_in_executor(None, _process_kletter_result, row.to_dict(), mongo_collection) 
+#             for _, row in top_kletters.iterrows()
+#         ]
+#         results_list = await asyncio.gather(*tasks)
 
-        print("Progress: 100% - Processing complete")
-        end_time = time.time()
-        execution_time = end_time - start_time
-        print(f"\nTotal execution time: {execution_time:.2f} seconds")
+#         print("Progress: 100% - Processing complete")
+#         end_time = time.time()
+#         execution_time = end_time - start_time
+#         print(f"\nTotal execution time: {execution_time:.2f} seconds")
 
-        return PredicateResponse(details=detail_dict, results=results_list)
+#         return PredicateResponse(details=detail_dict, results=results_list)
 
-    except Exception as e:
-        print(f"Unexpected error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+#     except Exception as e:
+#         print(f"Unexpected error: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/getPredicatesAllFieldsKeywordsSynonyms", response_model=EnhancedPredicateResponse)
 async def get_predicates_using_all_fields_and_keywords(
