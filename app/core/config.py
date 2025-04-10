@@ -35,8 +35,6 @@ class AppSettings(BaseSettings):
     # MongoDB Settings
     MONGO_DB_NAME: str = "se"
     MONGO_COLLECTION_NAME: str = "fixed_150tok_1024dims"
-    
-    model_config = SettingsConfigDict(env_file=".env")
 
 
 @lru_cache
