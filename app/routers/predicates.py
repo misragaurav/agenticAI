@@ -201,7 +201,10 @@ async def get_predicates_using_all_fields_and_keywords(
     raw_request: Request,
     mongo_collection=Depends(get_db),
     enrich_query: bool = False,
-    perform_reranking: bool = True # New flag for reranking
+    perform_reranking: bool = True, # New flag for reranking
+    indications_weight: float = SEARCH_WEIGHTS["indications"],
+    device_details_weight: float = SEARCH_WEIGHTS["device_details"],
+    operating_principle_weight: float = SEARCH_WEIGHTS["operating_principle"]
 ):
     try:
         # Log the raw request for debugging (no need to check for None now)
@@ -224,6 +227,16 @@ async def get_predicates_using_all_fields_and_keywords(
             raise HTTPException(
                 status_code=422,
                 detail="indications, device_details, and operating_principle cannot be empty"
+            )
+            
+        # Create weights tuple with custom values
+        custom_weights = (indications_weight, device_details_weight, operating_principle_weight)
+        
+        # Validate that weights sum to 1.0
+        if abs(sum(custom_weights) - 1.0) > 0.001:  # Using small epsilon for float comparison
+            raise HTTPException(
+                status_code=422,
+                detail=f"Search weights must sum to 1.0, got: {sum(custom_weights):.3f} from {custom_weights}"
             )
 
         # Use device_attributes directly as the details
@@ -293,11 +306,11 @@ async def get_predicates_using_all_fields_and_keywords(
         print("STEP 2: SEARCHING FOR SIMILAR PREDICATE DEVICES")
         print("="*80)
 
-        # Use search weights from centralized config
+        # Use search weights from parameters instead of centralized config
         print(f"\nUsing weighted scoring:")
-        print(f"- Indications: {SEARCH_WEIGHTS['indications']*100:.0f}% of total score")
-        print(f"- Device details: {SEARCH_WEIGHTS['device_details']*100:.0f}% of total score") 
-        print(f"- Operating principle: {SEARCH_WEIGHTS['operating_principle']*100:.0f}% of total score")
+        print(f"- Indications: {indications_weight*100:.0f}% of total score")
+        print(f"- Device details: {device_details_weight*100:.0f}% of total score") 
+        print(f"- Operating principle: {operating_principle_weight*100:.0f}% of total score")
 
         print("\nQuerying MongoDB using multi-query search...")
         # Await the now-async function
@@ -311,7 +324,8 @@ async def get_predicates_using_all_fields_and_keywords(
             model_id=settings.EMBEDDING_MODEL_ID,
             dimensions=settings.EMBEDDING_DIMENSIONS,
             normalize=True,
-            # weights are handled by query_mongo_LLM_assist internally
+            # Pass custom weights
+            weights=custom_weights
         )
         
         # =====================================================================

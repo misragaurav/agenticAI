@@ -10,9 +10,9 @@ SYNONYM_COUNT_PER_KEYWORD = 2  # Number of synonyms per keyword
 
 # Search component weights (must sum to 1.0)
 SEARCH_WEIGHTS = {
-    "indications": 0.7,       # 60% weight for indications matches
-    "device_details": 0.15,    # 20% weight for device details matches
-    "operating_principle": 0.15 # 20% weight for operating principle matches
+    "indications": 0.8,       # 80% weight for indications matches
+    "device_details": 0.1,    # 10% weight for device details matches
+    "operating_principle": 0.1 # 10% weight for operating principle matches
 }
 
 # Tuple form of weights for direct use in functions
